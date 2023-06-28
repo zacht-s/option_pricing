@@ -1,5 +1,6 @@
 import math
 from scipy.stats import norm
+import numpy as np
 import matplotlib.pyplot as plt
 
 
@@ -11,6 +12,9 @@ class European:
         self.r = r
         self.vol = vol
         self.type = type
+
+        if self.type.lower() not in ['call', 'put']:
+            raise TypeError('Type Variable must be Call or Put')
 
     def __repr__(self):
         return f'European {self.type} option. S0:{self.s0}  K:{self.k}  TTM:{self.ttm}  VOL{self.vol}  RF:{self.r}'
@@ -24,12 +28,22 @@ class European:
 
         if self.type.lower() == 'call':
             price = self.s0 * norm.cdf(d1) - self.k * math.exp(-self.r * self.ttm) * norm.cdf(d2)
-        elif self.type.lower() == 'put':
-            price = self.k * math.exp(-self.r * self.ttm) * norm.cdf(-d2) - self.s0 * norm.cdf(-d1)
         else:
-            raise TypeError('type must be call or put')
+            price = self.k * math.exp(-self.r * self.ttm) * norm.cdf(-d2) - self.s0 * norm.cdf(-d1)
 
         return round(price, 2)
+
+    def monte_carlo_price(self, sims):
+        terminal_prices = self.s0 * np.exp((self.r - self.vol ** 2 / 2) * self.ttm +
+                                           self.vol * math.sqrt(self.ttm) * np.random.normal(loc=0, scale=1, size=sims))
+
+        if self.type.lower() == 'call':
+            option_value = terminal_prices - self.k
+        else:
+            option_value = self.k - terminal_prices
+        option_value = np.where(option_value < 0, 0, option_value)
+
+        return round(np.mean(option_value) * math.exp(-self.r * self.ttm), 2)
 
 
 class American:
@@ -165,21 +179,25 @@ class American:
         plt.show()
         return None
 
+
 if __name__ == '__main__':
-    #test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='call')
+    test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='call')
     #print(f'European Call Price: {test1.bsm_price()}')
+    #print(f'Monte Carlo Call Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
 
     #test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='Put')
     #print(f'European Put Price: {test1.bsm_price()}')
+    #print(f'Monte Carlo Put Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
 
-    test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='Put')
-    print(f'American Put Price, Binomial Tree: {test2.bin_tree_price(steps=50)}')
+    #test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='Put')
+    #print(f'American Put Price, Binomial Tree: {test2.bin_tree_price(steps=50)}')
 
     #test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='call')
     #print(f'American Call Price, Binomial Tree: {test2.bin_tree_price(steps=5)}')
 
-    test2.bin_tree_convergence(50)
+    #test2.bin_tree_convergence(50)
 
-    print(f'American Put Price, Trinomial Tree: {test2.tri_tree_price(steps=50)}')
-    test2.tri_tree_convergence(50)
+    #print(f'American Put Price, Trinomial Tree: {test2.tri_tree_price(steps=50)}')
+    #test2.tri_tree_convergence(50)
+
 
