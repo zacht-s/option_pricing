@@ -1,6 +1,8 @@
 import math
+import time
 from scipy.stats import norm
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -100,7 +102,7 @@ class American:
             np1_prices = [max(x, y) for x, y in zip(hold_vec, imm_exercise)]
 
         option_price = ((1 - p) * np1_prices[0] + p * np1_prices[1]) * discount
-        return round(option_price, 3)
+        return round(option_price, 2)
 
     def bin_tree_convergence(self, steps_max):
         """
@@ -157,8 +159,7 @@ class American:
             np1_prices = [max(x, y) for x, y in zip(hold_vec, imm_exercise)]
 
         option_price = (pd * np1_prices[0] + pm * np1_prices[1] + pu * np1_prices[2]) * discount
-        return round(option_price, 3)
-
+        return round(option_price, 2)
 
     def tri_tree_convergence(self, steps_max):
         """
@@ -177,27 +178,108 @@ class American:
         plt.xlabel('Number of Steps')
         plt.ylabel('Option Price')
         plt.show()
-        return None
+        return
+
+    def monte_carlo_price(self, sims, steps, order=2):
+        """
+        Prices American Options via Monte Carlo Simulation. Value of holding the option at each timestep is estimated
+        using a polynomial regression, per the Longstaff Schwartz Algorithm.
+        :param sims: Int, Number of Simulations to Run
+        :param steps: Int, Number of steps in each realization of the underlying price pathway
+        :param order: Int, degree of the polynomial to use in regression, default of 2.
+        :return: option price
+        """
+
+        dt = self.ttm / steps
+
+        random_walks = np.exp((self.r - self.vol ** 2 / 2) * dt + \
+                       self.vol * math.sqrt(dt) * np.random.normal(loc=0, scale=1, size=(sims, steps)))
+
+        paths = np.cumprod(random_walks, axis=1) * self.s0
+
+        colnames = []
+        for i in range(steps):
+            colnames.append(f't{i+1}')
+
+        # Define Dataframes for Underlying price realizations, immediate execution values,
+        # and Cash from Exercising the option at each timestep
+        asset_df = pd.DataFrame(paths, columns=colnames)
+
+        if self.type.lower() == 'call':
+            imm_exc = asset_df - self.k
+        else:
+            imm_exc = self.k - asset_df
+        imm_exc = imm_exc.mask(imm_exc < 0, 0)
+
+        cash_df = imm_exc.copy()
+        cash_df[:] = 0
+        cash_df[imm_exc.columns[-1]] = imm_exc[imm_exc.columns[-1]]
+
+        # Begin Backward Calculation of Option Price
+        future_days = []
+        disc_vec = np.array([np.exp(-self.r * dt)])
+        for i in range(len(asset_df.columns)-1, 0, -1):
+            future_days.append(f't{i + 1}')
+
+            # Calculate the Expected Continuation Value E[v(t) | s(t-1)] by LongStaff Schwartz Regression
+            Y = cash_df.loc[imm_exc[f't{i}'] > 0, future_days] * disc_vec
+            Y = Y.sum(axis=1)
+            X = asset_df.loc[imm_exc[f't{i}'] > 0, f't{i}']
+            reg = np.polyfit(X, Y, order)
+            cont_val = np.polyval(reg, X)
+
+            # If Immediate Execution Value > Continuation Value, then option is exercised and later cash flows are 0
+            update_vec = np.where(imm_exc.loc[imm_exc[f't{i}'] > 0, f't{i}'] < cont_val, 0,
+                                  imm_exc.loc[imm_exc[f't{i}'] > 0, f't{i}'])
+
+            cash_df.loc[imm_exc[f't{i}'] > 0, f't{i}'] = update_vec
+            cash_df.loc[cash_df[f't{i}'] > 0, future_days] = 0
+
+            disc_vec *= np.exp(-self.r * dt)
+            disc_vec = np.append(disc_vec, np.exp(-self.r * dt))
+
+        dcf = cash_df * disc_vec[::-1]
+        option_value = round(dcf.sum(axis=0).sum() / len(asset_df.index), 2)
+        return option_value
 
 
 if __name__ == '__main__':
+    """
+    # European Option Testing Block
     test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='call')
-    #print(f'European Call Price: {test1.bsm_price()}')
-    #print(f'Monte Carlo Call Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
+    print(f'European Call Price: {test1.bsm_price()}')
+    print(f'Monte Carlo Call Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
 
-    #test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='Put')
-    #print(f'European Put Price: {test1.bsm_price()}')
-    #print(f'Monte Carlo Put Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
+    test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='Put')
+    print(f'European Put Price: {test1.bsm_price()}')
+    print(f'Monte Carlo Put Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
+    """
 
-    #test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='Put')
-    #print(f'American Put Price, Binomial Tree: {test2.bin_tree_price(steps=50)}')
+    """
+    # American Option Testing Block
+    test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='Put')
+    n_steps = 100
+    start = time.time()
+    option_val = test2.bin_tree_price(steps=n_steps)
+    end = time.time()
+    print(f'American Put Price, Binomial Tree: {option_val}, Execution Time: {round(end-start, 2)} seconds')
 
-    #test2 = American(s0=50, k=50, ttm=0.4167, r=0.1, vol=0.4, type='call')
-    #print(f'American Call Price, Binomial Tree: {test2.bin_tree_price(steps=5)}')
+    start = time.time()
+    option_val = test2.tri_tree_price(steps=n_steps)
+    end = time.time()
+    print(f'American Put Price, Trinomial Tree: {option_val}, Execution Time: {round(end - start, 2)} seconds')
+
+    n_sims = 100000
+    start = time.time()
+    option_val = test2.monte_carlo_price(n_sims, n_steps)
+    end = time.time()
+    print(f'American Put Price, LSM MonteCarlo: {option_val}, Execution Time: {round(end-start, 2)} seconds')
+    print('')
+    """
 
     #test2.bin_tree_convergence(50)
 
     #print(f'American Put Price, Trinomial Tree: {test2.tri_tree_price(steps=50)}')
     #test2.tri_tree_convergence(50)
 
-
+    pass
