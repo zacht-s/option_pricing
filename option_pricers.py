@@ -22,6 +22,28 @@ class European:
         return f'European {self.type} option. S0:{self.s0}  K:{self.k}  TTM:{self.ttm}  VOL{self.vol}  RF:{self.r}'
         pass
 
+    def greeks(self):
+        base_price = European(self.s0, self.k, self.ttm, self.r, self.vol, self.type).bsm_price()
+
+        delta = European(self.s0 + 1, self.k, self.ttm, self.r, self.vol, self.type).bsm_price() - base_price
+
+        theta = (European(self.s0, self.k, self.ttm + 0.1, self.r, self.vol, self.type).bsm_price() - base_price) / -0.1
+
+        rho = (European(self.s0, self.k, self.ttm, self.r + 0.1, self.vol, self.type).bsm_price() - base_price) / 0.1
+
+        vega = (European(self.s0, self.k, self.ttm, self.r, self.vol + 0.05, self.type).bsm_price() - base_price) / 0.05
+
+        d2 = base_price - European(self.s0 - 1, self.k, self.ttm, self.r, self.vol, self.type).bsm_price()
+        gamma = (delta - d2)
+
+        delta, theta, rho, vega, gamma = round(delta, 2), round(theta, 2), round(rho, 2), round(vega, 2), \
+            round(gamma, 3)
+
+        print(f'Delta: {delta}  Theta: {theta}  Rho: {rho}  Vega: {vega}  Gamma: {gamma}')
+
+        greeks = {'delta': delta, 'theta': theta, 'rho': rho, 'vega': vega, 'gamma': gamma}
+        return greeks
+
     def bsm_price(self):
         d1 = (math.log(self.s0/self.k) + self.ttm * (self.r + self.vol ** 2 / 2)) \
              / self.vol / math.sqrt(self.ttm)
@@ -126,6 +148,31 @@ class American:
     def __repr__(self):
         return f'American {self.type} option. S0:{self.s0}  K:{self.k}  TTM:{self.ttm}  VOL{self.vol}  RF:{self.r}'
         pass
+
+    def greeks(self):
+        base_price = American(self.s0, self.k, self.ttm, self.r, self.vol, self.type).bin_tree_price(50)
+
+        delta = American(self.s0 + 1, self.k, self.ttm, self.r, self.vol, self.type).bin_tree_price(50) - base_price
+
+        theta = (American(self.s0, self.k, self.ttm + 0.1, self.r, self.vol, self.type).bin_tree_price(50) -
+                 base_price) / -0.1
+
+        rho = (American(self.s0, self.k, self.ttm, self.r + 0.1, self.vol, self.type).bin_tree_price(50) -
+               base_price) / 0.1
+
+        vega = (American(self.s0, self.k, self.ttm, self.r, self.vol + 0.05, self.type).bin_tree_price(50) -
+                base_price) / 0.05
+
+        d2 = base_price - American(self.s0 - 1, self.k, self.ttm, self.r, self.vol, self.type).bin_tree_price(50)
+        gamma = (delta - d2)
+
+        delta, theta, rho, vega, gamma = round(delta, 2), round(theta, 2), round(rho, 2), round(vega, 2), \
+            round(gamma, 3)
+
+        print(f'Delta: {delta}  Theta: {theta}  Rho: {rho}  Vega: {vega}  Gamma: {gamma}')
+
+        greeks = {'delta': delta, 'theta': theta, 'rho': rho, 'vega': vega, 'gamma': gamma}
+        return greeks
 
     def bin_tree_price(self, steps):
         dt = self.ttm/steps
