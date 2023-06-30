@@ -47,6 +47,69 @@ class European:
 
         return round(np.mean(option_value) * math.exp(-self.r * self.ttm), 2)
 
+    def implicit_fd_price(self, t_steps, s_steps, s_max=None):
+        dt = self.ttm / t_steps
+        if s_max is None:
+            ds = self.s0 * 2 / s_steps
+        else:
+            ds = s_max / s_steps
+
+        def a_j(j):
+            return 1/2 * self.r * j * dt - 1/2 * self.vol**2 * j**2 * dt
+
+        def b_j(j):
+            return 1 + self.vol**2 * j**2 * dt + self.r * dt
+
+        def c_j(j):
+            return -1/2 * self.r * j * dt - 1/2 * self.vol**2 * j**2 * dt
+
+        df = pd.DataFrame(data=np.zeros(shape=(s_steps+1, t_steps+1)), index=range(s_steps, -1, -1))
+
+        if self.type.lower() == 'call':
+            df.loc[:, t_steps] = np.maximum(np.arange(start=s_steps, stop=-1, step=-1) * ds - self.k, 0)
+            df.loc[0, :] = 0
+            df.loc[s_steps, :] = ds * s_steps - self.k
+        else:
+            df.loc[:, t_steps] = np.maximum(self.k - np.arange(start=s_steps, stop=-1, step=-1) * ds, 0)
+            df.loc[0, :] = self.k
+            df.loc[s_steps, :] = 0
+
+        # Generate Coefficient Matrix to solve for interior grid points
+        A = []
+        temp = [b_j(s_steps-1), a_j(s_steps-1)] + [0]*(s_steps-3)
+        A.append(temp)
+        for i in range(s_steps-2, 1, -1):
+            temp = [0]*(s_steps-2-i)
+            temp.append(c_j(i))
+            temp.append(b_j(i))
+            temp.append(a_j(i))
+            temp += [0] * (i-2)
+            A.append(temp)
+
+        temp = [0]*(s_steps-3) + [c_j(1), b_j(1)]
+        A.append(temp)
+        A = pd.DataFrame(A).to_numpy()
+
+        s_vec = np.arange(start=s_steps, stop=-1, step=-1) * ds
+
+        for t_i in range(t_steps-1, -1, -1):
+            # b is next timestep answer to Ax = b Matrix Equation
+            b = df[t_i + 1].copy()
+            b[s_steps - 1] = b[s_steps - 1] - c_j(s_steps - 1) * b[s_steps]
+            b[1] = b[1] - a_j(1) * b[0]
+            b = b.drop([0, s_steps])
+
+            # x is approximate solution to BSM
+            x = np.matmul(np.linalg.inv(A), b)
+
+            update_vec = df.loc[:, t_i].copy()
+            update_vec.loc[range(s_steps-1, 0, -1)] = x
+            df.loc[:, t_i] = update_vec
+
+        # Numpy Interpolation Expects X (S0) values in increasing order
+        option_price = np.interp(self.s0, s_vec[::-1], df[0].to_numpy()[::-1])
+        return round(option_price, 2)
+
 
 class American:
     def __init__(self, s0, k, ttm, r, vol, type):
@@ -259,9 +322,15 @@ class American:
             return -1/2 * self.r * j * dt - 1/2 * self.vol**2 * j**2 * dt
 
         df = pd.DataFrame(data=np.zeros(shape=(s_steps+1, t_steps+1)), index=range(s_steps, -1, -1))
-        df.loc[:, t_steps] = np.maximum(self.k - np.arange(start=s_steps, stop=-1, step=-1) * ds, 0)
-        df.loc[0, :] = self.k
-        df.loc[s_steps, :] = 0
+
+        if self.type.lower() == 'call':
+            df.loc[:, t_steps] = np.maximum(np.arange(start=s_steps, stop=-1, step=-1) * ds - self.k, 0)
+            df.loc[0, :] = 0
+            df.loc[s_steps, :] = ds * s_steps - self.k
+        else:
+            df.loc[:, t_steps] = np.maximum(self.k - np.arange(start=s_steps, stop=-1, step=-1) * ds, 0)
+            df.loc[0, :] = self.k
+            df.loc[s_steps, :] = 0
 
         # Generate Coefficient Matrix to solve for interior grid points
         A = []
@@ -306,12 +375,16 @@ if __name__ == '__main__':
     """
     # European Option Testing Block
     test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='call')
-    print(f'European Call Price: {test1.bsm_price()}')
+    print(f'European Call Price, BSM: {test1.bsm_price()}')
     print(f'Monte Carlo Call Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
+    print(f'Implicit Finite Difference Call Price: {test1.implicit_fd_price(100, 100)}')
+    print('')
 
     test1 = European(s0=100, k=110, ttm=0.5, r=0.04, vol=0.3, type='Put')
     print(f'European Put Price: {test1.bsm_price()}')
     print(f'Monte Carlo Put Price (1,000,000 Trials): {test1.monte_carlo_price(1000000)}')
+    print(f'Implicit Finite Difference Put Price: {test1.implicit_fd_price(100, 100)}')
+    print('')
     """
 
     """
