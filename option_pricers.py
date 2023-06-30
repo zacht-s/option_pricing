@@ -242,6 +242,65 @@ class American:
         option_value = round(dcf.sum(axis=0).sum() / len(asset_df.index), 2)
         return option_value
 
+    def implicit_fd_price(self, t_steps, s_steps, s_max=None):
+        dt = self.ttm / t_steps
+        if s_max is None:
+            ds = self.s0 * 2 / s_steps
+        else:
+            ds = s_max / s_steps
+
+        def a_j(j):
+            return 1/2 * self.r * j * dt - 1/2 * self.vol**2 * j**2 * dt
+
+        def b_j(j):
+            return 1 + self.vol**2 * j**2 * dt + self.r * dt
+
+        def c_j(j):
+            return -1/2 * self.r * j * dt - 1/2 * self.vol**2 * j**2 * dt
+
+        df = pd.DataFrame(data=np.zeros(shape=(s_steps+1, t_steps+1)), index=range(s_steps, -1, -1))
+        df.loc[:, t_steps] = np.maximum(self.k - np.arange(start=s_steps, stop=-1, step=-1) * ds, 0)
+        df.loc[0, :] = self.k
+        df.loc[s_steps, :] = 0
+
+        # Generate Coefficient Matrix to solve for interior grid points
+        A = []
+        temp = [b_j(s_steps-1), a_j(s_steps-1)] + [0]*(s_steps-3)
+        A.append(temp)
+        for i in range(s_steps-2, 1, -1):
+            temp = [0]*(s_steps-2-i)
+            temp.append(c_j(i))
+            temp.append(b_j(i))
+            temp.append(a_j(i))
+            temp += [0] * (i-2)
+            A.append(temp)
+
+        temp = [0]*(s_steps-3) + [c_j(1), b_j(1)]
+        A.append(temp)
+        A = pd.DataFrame(A).to_numpy()
+
+        s_vec = np.arange(start=s_steps, stop=-1, step=-1) * ds
+
+        for t_i in range(t_steps-1, -1, -1):
+            # b is next timestep answer to Ax = b Matrix Equation
+            b = df[t_i + 1].copy()
+            b[s_steps - 1] = b[s_steps - 1] - c_j(s_steps - 1) * b[s_steps]
+            b[1] = b[1] - a_j(1) * b[0]
+            b = b.drop([0, s_steps])
+
+            x = np.matmul(np.linalg.inv(A), b)
+
+            # x is approximate solution to BSM, update is max(x, K-S) for immediate exercise option with
+            # American style options
+            temp = df.loc[:, t_i].copy()
+            temp.loc[range(s_steps-1, 0, -1)] = x
+            update_vec = np.maximum(df[t_steps], temp)
+            df.loc[:, t_i] = update_vec
+
+        # Numpy Interpolation Expects X (S0) values in increasing order
+        option_price = np.interp(self.s0, s_vec[::-1], df[0].to_numpy()[::-1])
+        return round(option_price, 2)
+
 
 if __name__ == '__main__':
     """
@@ -274,12 +333,17 @@ if __name__ == '__main__':
     option_val = test2.monte_carlo_price(n_sims, n_steps)
     end = time.time()
     print(f'American Put Price, LSM MonteCarlo: {option_val}, Execution Time: {round(end-start, 2)} seconds')
+
+    tsteps, ssteps = 100, 100
+    start = time.time()
+    option_val = test2.implicit_fd_price(t_steps=tsteps, s_steps=ssteps)
+    end = time.time()
+    print(f'American Put Price, Implicit Finite Difference: {option_val}, '
+          f'Execution Time: {round(end - start, 2)} seconds')
     print('')
+
+    # test2.bin_tree_convergence(50)
+    # test2.tri_tree_convergence(50)
     """
-
-    #test2.bin_tree_convergence(50)
-
-    #print(f'American Put Price, Trinomial Tree: {test2.tri_tree_price(steps=50)}')
-    #test2.tri_tree_convergence(50)
 
     pass
